@@ -1188,7 +1188,7 @@ class WP_CLI {
 	 * Optionally:
 	 *
 	 * * Run the command in an existing process.
-	 * * Prevent halting script execution on error.
+	 * * Prevent halting script execution or throw exception on error.
 	 * * Capture and return STDOUT, or full details about command execution.
 	 * * Parse JSON output if the command rendered it.
 	 *
@@ -1197,7 +1197,7 @@ class WP_CLI {
 	 *   'return'     => true,   // Return 'STDOUT'; use 'all' for full object.
 	 *   'parse'      => 'json', // Parse captured STDOUT to JSON array.
 	 *   'launch'     => false,  // Reuse the current process.
-	 *   'exit_error' => true,   // Halt script execution on error.
+	 *   'on_error'   => 'exit', // Halt script execution on error.
 	 * );
 	 * $plugins = WP_CLI::runcommand( 'plugin list --format=json', $options );
 	 * ```
@@ -1212,13 +1212,24 @@ class WP_CLI {
 	public static function runcommand( $command, $options = array() ) {
 		$defaults   = array(
 			'launch'     => true, // Launch a new process, or reuse the existing.
-			'exit_error' => true, // Exit on error by default.
+			'on_error'   => 'exit', // Exit on error by default.
 			'return'     => false, // Capture and return output, or render in realtime.
 			'parse'      => false, // Parse returned output as a particular format.
 		);
+		
+		if ( array_key_exists( 'exit_error', $options ) ) {
+			if ( $options['exit_error'] ) {
+				$options['on_error'] = 'exit';
+			} else {
+				$options['on_error'] = 'catch';
+			}
+			
+			unset( $options['exit_error'] );
+		}
+		
 		$options    = array_merge( $defaults, $options );
 		$launch     = $options['launch'];
-		$exit_error = $options['exit_error'];
+		$on_error   = $options['on_error'];
 		$return     = $options['return'];
 		$parse      = $options['parse'];
 		$retval     = null;
@@ -1267,7 +1278,7 @@ class WP_CLI {
 			$return_code = proc_close( $proc );
 			if ( -1 === $return_code ) {
 				self::warning( 'Spawned process returned exit code -1, which could be caused by a custom compiled version of PHP that uses the --enable-sigchild option.' );
-			} elseif ( $return_code && $exit_error ) {
+			} elseif ( $return_code && $on_error === 'exit' ) {
 				exit( $return_code );
 			}
 			if ( true === $return || 'stdout' === $return ) {
@@ -1292,7 +1303,7 @@ class WP_CLI {
 				self::$logger    = new WP_CLI\Loggers\Execution();
 				self::$logger->ob_start();
 			}
-			if ( ! $exit_error ) {
+			if ( $on_error !== 'exit' ) {
 				self::$capture_exit = true;
 			}
 			try {
@@ -1305,7 +1316,11 @@ class WP_CLI {
 				);
 				$return_code = 0;
 			} catch ( ExitException $e ) {
-				$return_code = $e->getCode();
+				if ( $on_error === 'throw' ) {
+					throw $e;
+				} else {
+					$return_code = $e->getCode();
+				}
 			}
 			if ( $return ) {
 				$execution_logger = self::$logger;
@@ -1327,7 +1342,7 @@ class WP_CLI {
 					);
 				}
 			}
-			if ( ! $exit_error ) {
+			if ( $on_error !== 'exit' ) {
 				self::$capture_exit = false;
 			}
 		}
